@@ -1,21 +1,80 @@
 import json
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from django.shortcuts import get_object_or_404
-from .models import User
 import anthropic
-import json
 from django.conf import settings
-import json
 import PyPDF2
-import anthropic
+from .models import User
 from django.http import JsonResponse
 from django.views import View
 from django.shortcuts import get_object_or_404
 from django.views.decorators.csrf import csrf_exempt
-from django.utils.decorators import method_context_decorator, method_decorator
-from .models import User
+from django.utils.decorators import method_decorator
+from rest_framework.views import APIView
+from rest_framework import status
+from rest_framework.response import Response
+
+# Disable CSRF so React can communicate with Django easily during the hackathon
+@method_decorator(csrf_exempt, name='dispatch')
+class VerifyCandidateView(View):
+    
+    # ------------------------------------------------------------------
+    # 1. GET Request: Load Candidate Details BEFORE they enter password
+    # ------------------------------------------------------------------
+    def get(self, request, uuid):
+        try:
+            candidate = User.objects.get(uuid=uuid)
+            
+            # Send basic details so React can build the "Welcome" screen
+            return JsonResponse({
+                "valid_link": True,
+                "first_name": candidate.first_name,
+                "last_name": candidate.last_name,
+                "email": candidate.email,
+                "role": candidate.job_role.title if candidate.job_role else "Faculty Role",
+                "status": candidate.status
+            }, status=200)
+            
+        except User.DoesNotExist:
+            return JsonResponse({
+                "valid_link": False, 
+                "error": "Invalid or expired assessment link."
+            }, status=404)
+
+    # ------------------------------------------------------------------
+    # 2. POST Request: Verify the password and log them in
+    # ------------------------------------------------------------------
+    def post(self, request, uuid):
+        try:
+            candidate = User.objects.get(uuid=uuid)
+            
+            # Parse the JSON sent from React
+            data = json.loads(request.body)
+            provided_password = data.get('password', '')
+
+            # Check if the password matches the one we generated in the Admin
+            if candidate.password == provided_password:
+                return JsonResponse({
+                    "success": True,
+                    "message": "Login successful! Redirecting to assessment...",
+                    "candidate": {
+                        "uuid": str(candidate.uuid),
+                        "first_name": candidate.first_name,
+                        "last_name": candidate.last_name,
+                        "email": candidate.email,
+                        "role": candidate.job_role.title if candidate.job_role else "Faculty Role",
+                        "status": candidate.status
+                    }
+                }, status=200)
+            else:
+                # Password doesn't match!
+                return JsonResponse({
+                    "success": False, 
+                    "error": "Incorrect password. Please check your email."
+                }, status=401)
+
+        except User.DoesNotExist:
+            return JsonResponse({"success": False, "error": "Candidate not found."}, status=404)
+        except json.JSONDecodeError:
+            return JsonResponse({"success": False, "error": "Invalid request formatting."}, status=400)
 
 # Disable CSRF for the hackathon so React can POST easily
 @method_decorator(csrf_exempt, name='dispatch')

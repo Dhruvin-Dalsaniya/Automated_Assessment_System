@@ -22,7 +22,7 @@ urlpatterns = [
     # Frontend requests: /api/questions/<uuid>/2/ (Gets Descriptive)
     # Frontend requests: /api/questions/<uuid>/3/ (Gets AI Generated)
     # ---------------------------------------------------------
-    path('api/questions/<uuid:uuid>/<int:round_num>/', views.FetchRoundView.as_view(), name='fetch-round'),
+    # path('api/questions/<uuid:uuid>/<int:round_num>/', views.FetchRoundView.as_view(), name='fetch-round'),
 
     # ---------------------------------------------------------
     # 4. SUBMIT & EVALUATE
@@ -30,5 +30,5 @@ urlpatterns = [
     # Backend marks correct/incorrect/skipped for Round 1.
     # On Round 3, it triggers the final Admin Report Card evaluation.
     # ---------------------------------------------------------
-    path('api/submit/<uuid:uuid>/<int:round_num>/', views.SubmitRoundView.as_view(), name='submit-round'),
+    # path('api/submit/<uuid:uuid>/<int:round_num>/', views.SubmitRoundView.as_view(), name='submit-round'),
 ]
