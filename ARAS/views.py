@@ -7,6 +7,106 @@ from .models import User
 import anthropic
 import json
 from django.conf import settings
+import json
+import PyPDF2
+import anthropic
+from django.http import JsonResponse
+from django.views import View
+from django.shortcuts import get_object_or_404
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_context_decorator, method_decorator
+from .models import User
+
+# Disable CSRF for the hackathon so React can POST easily
+@method_decorator(csrf_exempt, name='dispatch')
+class UploadResumeView(View):
+    def post(self, request, uuid):
+        try:
+            # 1. Get Candidate and Resume
+            candidate = get_object_or_404(User, uuid=uuid)
+            resume_file = request.FILES.get('resume')
+
+            if not resume_file:
+                return JsonResponse({"error": "No resume file provided"}, status=400)
+
+            # 2. Save file and update status
+            candidate.resume = resume_file
+            candidate.status = 'IN_PROGRESS' # State change!
+            candidate.save()
+
+            # 3. Extract Text from PDF
+            resume_text = ""
+            try:
+                pdf_reader = PyPDF2.PdfReader(resume_file)
+                for page in pdf_reader.pages:
+                    resume_text += page.extract_text() + "\n"
+            except Exception as e:
+                return JsonResponse({"error": f"Failed to read PDF: {str(e)}"}, status=400)
+
+            # 4. Generate AI Round 3 Questions (Using Anthropic)
+            job_title = candidate.job_role.title if candidate.job_role else "Faculty Member"
+            
+            # The Pre-defined AI Prompt
+            prompt = f"""
+            You are an expert academic interviewer hiring a {job_title}.
+            Review the following candidate resume text.
+            
+            RESUME TEXT:
+            {resume_text}
+            
+            Generate EXACTLY 2 highly specific, descriptive interview questions based ONLY on the experience, projects, or skills mentioned in this resume. 
+            These questions should test their practical knowledge and teaching ability.
+            
+            Output ONLY a raw JSON array of objects. Do not include markdown formatting or backticks.
+            Format exactly like this:
+            [
+              {{
+                "id": 301,
+                "question": "Your first custom question here?",
+                "type": "text"
+              }},
+              {{
+                "id": 302,
+                "question": "Your second custom question here?",
+                "type": "text"
+              }}
+            ]
+            """
+
+            # Call Claude 3 Haiku (Fast & Cheap)
+            client = anthropic.Anthropic(api_key="sk-ant-your-key-here") # Hide in .env later!
+            message = client.messages.create(
+                model="claude-3-haiku-20240307",
+                max_tokens=500,
+                temperature=0.2,
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            # 5. Parse AI Response
+            try:
+                ai_questions = json.loads(message.content[0].text.strip())
+            except Exception as e:
+                print("JSON Parsing failed, falling back to default.", e)
+                ai_questions = [
+                    {"id": 301, "question": "Could you explain your most complex project to a beginner?", "type": "text"},
+                    {"id": 302, "question": "Why are you interested in this specific role?", "type": "text"}
+                ]
+
+            # 6. Initialize the JSON Payload (We will fill Rounds 1 & 2 later)
+            candidate.hybrid_questions_payload = {
+                "round_1_mcq": [], # To be populated from database
+                "round_2_descriptive": [], # To be populated from database
+                "round_3_ai_dynamic": ai_questions
+            }
+            candidate.save()
+
+            return JsonResponse({
+                "message": "Resume uploaded successfully! AI has generated custom questions.",
+                "status": candidate.status
+            }, status=200)
+
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
 
 def generate_final_ai_report(candidate_name, job_role_title, answers_data):
     # Initialize Anthropic Client
